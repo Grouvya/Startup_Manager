@@ -2,6 +2,9 @@
 
 A modern, feature-rich GUI application for managing Linux startup applications with support for native apps, Flatpak, and Snap packages. Built with Python and Tkinter, featuring a sleek dark theme and intuitive interface.
 
+<img width="1232" height="909" alt="image" src="https://github.com/user-attachments/assets/7d30a710-f5fc-47c6-bfa4-aa80e82a300d" />
+
+
 ## Features
 
 ### Core Functionality
