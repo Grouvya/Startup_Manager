@@ -50,11 +50,6 @@ sudo dnf install snapd    # Fedora
 ## Installation
 
 1. Download the script:
-```bash
-wget https://example.com/Startup_Manager.py
-# or
-curl -O https://example.com/Startup_Manager.py
-```
 
 2. Make it executable:
 ```bash
