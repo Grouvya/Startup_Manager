@@ -1,0 +1,61 @@
+#!/bin/sh
+set -e
+. /usr/share/debconf/confmodule
+
+APP_NAME="startup-manager"
+DESKTOP_FILE="/usr/share/applications/startup-manager.desktop"
+
+# Get user choices
+db_get startup-manager/create-desktop-shortcut
+CREATE_DESKTOP=$RET
+
+db_get startup-manager/create-menu-shortcut
+CREATE_MENU=$RET
+
+if [ "$CREATE_MENU" = "true" ]; then
+    echo "Creating app menu shortcut..."
+    # Desktop file is already in /usr/share/applications from the package itself
+else
+    echo "Skipping app menu shortcut (removing it)..."
+    rm -f "$DESKTOP_FILE"
+fi
+
+if [ "$CREATE_DESKTOP" = "true" ]; then
+    echo "Creating desktop shortcut..."
+    
+    # Try to find the user who is actually logged in and running the desktop
+    REAL_USER="$SUDO_USER"
+    if [ -z "$REAL_USER" ]; then
+        REAL_USER=$(logname 2>/dev/null || echo "$USER")
+    fi
+    
+    # If still empty or root, try to find the first non-system user
+    if [ "$REAL_USER" = "root" ] || [ -z "$REAL_USER" ]; then
+        REAL_USER=$(awk -F: '$3 >= 1000 && $3 != 65534 {print $1; exit}' /etc/passwd)
+    fi
+
+    if [ -n "$REAL_USER" ]; then
+        USER_HOME=$(getent passwd "$REAL_USER" | cut -d: -f6)
+        
+        # Use xdg-user-dir to find the Desktop folder (handles localization)
+        DESKTOP_DIR=$(sudo -u "$REAL_USER" xdg-user-dir DESKTOP 2>/dev/null)
+        if [ -z "$DESKTOP_DIR" ] || [ ! -d "$DESKTOP_DIR" ]; then
+            DESKTOP_DIR="$USER_HOME/Desktop"
+        fi
+
+        if [ -d "$DESKTOP_DIR" ]; then
+            cp "$DESKTOP_FILE" "$DESKTOP_DIR/"
+            chown "$REAL_USER:$REAL_USER" "$DESKTOP_DIR/$(basename $DESKTOP_FILE)"
+            chmod +x "$DESKTOP_DIR/$(basename $DESKTOP_FILE)"
+            
+            # Mark as trusted (for GNOME/Cinnamon/XFCE)
+            # We try to run this as the user, but it often needs DBUS session info which isn't easy here.
+            # However, placing it and setting +x is the most we can safely do.
+            if command -v gio >/dev/null 2>&1; then
+                sudo -u "$REAL_USER" gio set "$DESKTOP_DIR/$(basename $DESKTOP_FILE)" metadata::trusted true || true
+            fi
+        fi
+    fi
+fi
+
+exit 0

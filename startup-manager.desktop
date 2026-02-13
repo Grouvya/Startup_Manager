@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Startup Manager
+Comment=Manage your system startup applications
+Exec=startup-manager
+Icon=startup-manager
+Terminal=false
+Type=Application
+Categories=Settings;System;
+Keywords=startup;manager;boot;autostart;
+StartupWMClass=startup-manager

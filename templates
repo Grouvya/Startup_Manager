@@ -1,0 +1,11 @@
+Template: startup-manager/create-desktop-shortcut
+Type: boolean
+Default: true
+Description: Create a desktop shortcut?
+ Should a shortcut to Startup Manager be created on your desktop?
+
+Template: startup-manager/create-menu-shortcut
+Type: boolean
+Default: true
+Description: Create an app menu shortcut?
+ Should Startup Manager be added to your applications menu?

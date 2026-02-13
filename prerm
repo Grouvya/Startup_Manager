@@ -1,0 +1,32 @@
+#!/bin/sh
+set -e
+
+APP_NAME="startup-manager"
+DESKTOP_FILE_NAME="startup-manager.desktop"
+
+# Try to find the user who is actually logged in and running the desktop
+REAL_USER="$SUDO_USER"
+if [ -z "$REAL_USER" ]; then
+    REAL_USER=$(logname 2>/dev/null || echo "$USER")
+fi
+
+# If still empty or root, try to find the first non-system user
+if [ "$REAL_USER" = "root" ] || [ -z "$REAL_USER" ]; then
+    REAL_USER=$(awk -F: '$3 >= 1000 && $3 != 65534 {print $1; exit}' /etc/passwd)
+fi
+
+if [ -n "$REAL_USER" ]; then
+    USER_HOME=$(getent passwd "$REAL_USER" | cut -d: -f6)
+    
+    # Use xdg-user-dir to find the Desktop folder
+    DESKTOP_DIR=$(sudo -u "$REAL_USER" xdg-user-dir DESKTOP 2>/dev/null)
+    if [ -z "$DESKTOP_DIR" ] || [ ! -d "$DESKTOP_DIR" ]; then
+        DESKTOP_DIR="$USER_HOME/Desktop"
+    fi
+
+    if [ -d "$DESKTOP_DIR" ]; then
+        rm -f "$DESKTOP_DIR/$DESKTOP_FILE_NAME"
+    fi
+fi
+
+exit 0

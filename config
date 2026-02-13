@@ -1,0 +1,7 @@
+#!/bin/sh
+set -e
+. /usr/share/debconf/confmodule
+
+db_input high startup-manager/create-desktop-shortcut || true
+db_input high startup-manager/create-menu-shortcut || true
+db_go || true
