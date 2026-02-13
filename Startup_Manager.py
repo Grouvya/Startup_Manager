@@ -10,21 +10,33 @@ from pathlib import Path
 import threading
 import json
 import re
+import sys
 
 class ModernStartupManager:
     def __init__(self, root):
         self.root = root
+        # Set WM_CLASS for taskbar icon matching
+        self.root.wm_group(self.root)
+        self.root.option_add('*tearOff', tk.FALSE)
+
         self.root.title("🚀 Startup Manager")
         self.root.geometry("1100x750")
         self.root.configure(bg='#1e1e2e')
 
         # Set window icon
         try:
-            icon_photo = tk.PhotoImage(width=32, height=32)
-            icon_photo.put('#89b4fa', (0, 0, 32, 32))
-            self.root.iconphoto(True, icon_photo)
-        except:
-            pass
+            icon_path = self.resource_path("build_assets/icon.png")
+            if os.path.exists(icon_path):
+                img = tk.PhotoImage(file=icon_path)
+                self.root.iconphoto(True, img)
+            else:
+                # Fallback to system icon if installed
+                system_icon = "/usr/share/icons/hicolor/256x256/apps/startup-manager.png"
+                if os.path.exists(system_icon):
+                    img = tk.PhotoImage(file=system_icon)
+                    self.root.iconphoto(True, img)
+        except Exception as e:
+            print(f"Error loading icon: {e}")
 
         # Modern color scheme
         self.colors = {
@@ -78,6 +90,16 @@ class ModernStartupManager:
         self.setup_ui()
         # Moved load_applications after setup_ui to ensure widgets exist
         self.load_applications()
+
+    def resource_path(self, relative_path):
+        """ Get absolute path to resource, works for dev and for PyInstaller """
+        try:
+            # PyInstaller creates a temp folder and stores path in _MEIPASS
+            base_path = sys._MEIPASS
+        except Exception:
+            base_path = os.path.abspath(".")
+
+        return os.path.join(base_path, relative_path)
 
     def check_command_available(self, command):
         """Check if a command is available in the system"""
@@ -1533,7 +1555,7 @@ class ModernCustomAppDialog:
 
 
 if __name__ == "__main__":
-    root = tk.Tk()
+    root = tk.Tk(className='startup-manager')
 
     try:
         icon_img = tk.PhotoImage(width=16, height=16)
