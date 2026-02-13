@@ -76,6 +76,7 @@ class ModernStartupManager:
         self.filter_var = tk.StringVar(value="all")
 
         self.setup_ui()
+        # Moved load_applications after setup_ui to ensure widgets exist
         self.load_applications()
 
     def check_command_available(self, command):
@@ -176,6 +177,9 @@ class ModernStartupManager:
 
         # Control panel
         self.create_control_panel(content_frame)
+
+        # Details panel
+        self.create_details_panel(content_frame)
 
         # Status bar
         self.create_status_bar(main_container)
@@ -375,7 +379,47 @@ class ModernStartupManager:
         import_btn = ttk.Button(buttons_frame, text="📥 Import",
                               style='Modern.TButton',
                               command=self.import_config)
-        import_btn.pack(side='left')
+        import_btn.pack(side='left', padx=(0, 10))
+
+        # Run Now button
+        run_btn = ttk.Button(buttons_frame, text="🚀 Run Now",
+                           style='Modern.TButton',
+                           command=self.run_app_now)
+        run_btn.pack(side='left')
+
+    def create_details_panel(self, parent):
+        """Create a dedicated area for application details"""
+        self.details_card = ttk.Frame(parent, style='Card.TFrame', padding=15)
+        self.details_card.grid(row=3, column=0, sticky='ew', pady=(20, 0))
+        
+        self.details_text = tk.Text(self.details_card, height=4, 
+                                  bg=self.colors['bg_secondary'],
+                                  fg=self.colors['text_secondary'],
+                                  font=('Segoe UI', 10),
+                                  relief='flat', state='disabled',
+                                  padx=10, pady=10)
+        self.details_text.pack(fill='x')
+
+    def update_details_panel(self, app_name):
+        """Update details panel with app information"""
+        app_info = self.filtered_apps.get(app_name, self.applications.get(app_name))
+        if not app_info:
+            return
+
+        self.details_text.configure(state='normal')
+        self.details_text.delete('1.0', tk.END)
+        
+        details = [
+            f"📍 Name: {app_name}",
+            f"💻 Command: {app_info['exec']}",
+            f"📦 Type: {app_info.get('type', 'native').capitalize()}"
+        ]
+        
+        if app_info.get('desktop_file'):
+            details.append(f"📁 Source: {app_info['desktop_file']}")
+            
+        self.details_text.insert(tk.END, "\n".join(details))
+        self.details_text.configure(state='disabled')
 
     def create_status_bar(self, parent):
         """Create status bar"""
@@ -454,6 +498,26 @@ class ModernStartupManager:
             item = self.apps_tree.item(selection[0])
             app_name = self.extract_app_name(item['text'])
             self.status_var.set(f"Selected: {app_name}")
+            self.update_details_panel(app_name)
+
+
+    def run_app_now(self):
+        """Run the selected application immediately"""
+        result = self.get_selected_app()
+        if not result:
+            return
+        
+        app_name, app_info = result
+        try:
+            cmd = app_info['exec']
+            # Remove % field codes if still present
+            cmd = re.sub(r'%[fFuUnNdDiIcCkKvV]', '', cmd).strip()
+            
+            subprocess.Popen(cmd, shell=True, start_new_session=True)
+            self.status_var.set(f"🚀 Launched {app_name}")
+        except Exception as e:
+            self.show_message("Error", f"Failed to launch {app_name}: {str(e)}", 'error')
+
 
     def extract_app_name(self, display_name):
         """Extract clean app name from display name"""
@@ -466,7 +530,7 @@ class ModernStartupManager:
         """Refresh with animation"""
         def refresh():
             self.load_applications()
-            self.status_var.set("✅ Refresh complete")
+            self.root.after(0, lambda: self.status_var.set("✅ Refresh complete"))
 
         threading.Thread(target=refresh, daemon=True).start()
         self.status_var.set("🔄 Refreshing applications...")
@@ -597,6 +661,19 @@ class ModernStartupManager:
             desktop_filename = f"{safe_name}.desktop"
             autostart_file = self.autostart_path / desktop_filename
 
+            # Load existing metadata if available
+            original_config = {}
+            if app_info.get('desktop_file') and os.path.exists(app_info['desktop_file']):
+                try:
+                    parser = configparser.ConfigParser(interpolation=None, strict=False)
+                    parser.read(app_info['desktop_file'], encoding='utf-8')
+                    if 'Desktop Entry' in parser:
+                        for key in ['Icon', 'Comment', 'Categories', 'GenericName', 'Keywords']:
+                            if key in parser['Desktop Entry']:
+                                original_config[key] = parser['Desktop Entry'][key]
+                except:
+                    pass
+
             with open(autostart_file, 'w', encoding='utf-8') as f:
                 f.write("[Desktop Entry]\n")
                 f.write("Type=Application\n")
@@ -611,13 +688,20 @@ class ModernStartupManager:
 
                 f.write("Hidden=false\n")
                 f.write("X-GNOME-Autostart-enabled=true\n")
+                
+                # Write preserved metadata
+                for key, value in original_config.items():
+                    f.write(f"{key}={value}\n")
 
                 if app_info.get('type') == 'flatpak':
-                    f.write(f"Comment=Flatpak: {app_info.get('app_id', '')}\n")
+                    if 'Comment' not in original_config:
+                        f.write(f"Comment=Flatpak: {app_info.get('app_id', '')}\n")
                 elif app_info.get('type') == 'snap':
-                    f.write("Comment=Snap Application\n")
+                    if 'Comment' not in original_config:
+                        f.write("Comment=Snap Application\n")
                 elif app_info.get('type') == 'custom':
-                    f.write("Comment=Custom Application\n")
+                    if 'Comment' not in original_config:
+                        f.write("Comment=Custom Application\n")
 
                 if delay > 0:
                     f.write(f"X-GNOME-Autostart-Delay={delay}\n")
@@ -725,31 +809,26 @@ class ModernStartupManager:
 
                 for autostart_file in self.autostart_path.glob("*.desktop"):
                     try:
-                        config = configparser.ConfigParser()
+                        config = configparser.ConfigParser(interpolation=None, strict=False)
                         config.read(autostart_file, encoding='utf-8')
                         if config.has_section('Desktop Entry'):
                             if config['Desktop Entry'].get('Name', '') == app_name:
+                                # Preserve existing metadata
+                                entry = config['Desktop Entry']
+                                entry['X-GNOME-Autostart-enabled'] = 'true'
+                                entry['Hidden'] = 'false'
+                                
+                                if delay > 0:
+                                    escaped_exec = app_info['exec'].replace("'", "'\\''")
+                                    entry['Exec'] = f"sh -c 'sleep {delay} && {escaped_exec}'"
+                                    entry['X-GNOME-Autostart-Delay'] = str(delay)
+                                else:
+                                    entry['Exec'] = app_info['exec']
+                                    if 'X-GNOME-Autostart-Delay' in entry:
+                                        del entry['X-GNOME-Autostart-Delay']
+                                
                                 with open(autostart_file, 'w', encoding='utf-8') as f:
-                                    f.write("[Desktop Entry]\n")
-                                    f.write("Type=Application\n")
-                                    f.write(f"Name={app_name}\n")
-
-                                    if delay > 0:
-                                        escaped_exec = app_info['exec'].replace("'", "'\\''")
-                                        f.write(f"Exec=sh -c 'sleep {delay} && {escaped_exec}'\n")
-                                    else:
-                                        f.write(f"Exec={app_info['exec']}\n")
-
-                                    f.write("Hidden=false\n")
-                                    f.write("X-GNOME-Autostart-enabled=true\n")
-
-                                    if app_info.get('type') == 'flatpak':
-                                        f.write(f"Comment=Flatpak: {app_info.get('app_id', '')}\n")
-                                    elif app_info.get('type') == 'snap':
-                                        f.write("Comment=Snap Application\n")
-
-                                    if delay > 0:
-                                        f.write(f"X-GNOME-Autostart-Delay={delay}\n")
+                                    config.write(f, space_around_delimiters=False)
                                 break
                     except Exception as e:
                         print(f"Error updating autostart file: {e}")
@@ -914,66 +993,71 @@ class ModernStartupManager:
 
         # Check autostart entries
         try:
-            for autostart_file in self.autostart_path.glob("*.desktop"):
-                try:
-                    config = configparser.ConfigParser()
-                    config.read(autostart_file, encoding='utf-8')
+            if self.autostart_path.exists():
+                for autostart_file in self.autostart_path.glob("*.desktop"):
+                    try:
+                        config = configparser.RawConfigParser(strict=False)
+                        config.read(autostart_file, encoding='utf-8')
 
-                    if config.has_section('Desktop Entry'):
-                        entry = config['Desktop Entry']
-                        app_name = entry.get('Name', '').strip()
-                        exec_cmd = entry.get('Exec', '').strip()
+                        if config.has_section('Desktop Entry'):
+                            entry = config['Desktop Entry']
+                            app_name = entry.get('Name', '').strip()
+                            exec_cmd = entry.get('Exec', '').strip()
 
-                        if not app_name or not exec_cmd:
-                            continue
+                            if not app_name or not exec_cmd:
+                                continue
 
-                        delay = 0
-                        actual_exec = exec_cmd
+                            delay = 0
+                            actual_exec = exec_cmd
 
-                        if 'sh -c' in exec_cmd and 'sleep' in exec_cmd:
-                            try:
-                                match = re.search(r"sh -c ['\"]sleep (\d+) && (.+)['\"]", exec_cmd)
-                                if match:
-                                    delay = int(match.group(1))
-                                    actual_exec = match.group(2)
-                            except:
-                                pass
+                            if 'sh -c' in exec_cmd and 'sleep' in exec_cmd:
+                                try:
+                                    match = re.search(r"sh -c ['\"]sleep (\d+) && (.+)['\"]", exec_cmd)
+                                    if match:
+                                        delay = int(match.group(1))
+                                        actual_exec = match.group(2)
+                                except:
+                                    pass
 
-                        if not delay:
-                            try:
-                                delay = int(entry.get('X-GNOME-Autostart-Delay', '0'))
-                            except:
-                                delay = 0
+                            if not delay:
+                                try:
+                                    delay = int(entry.get('X-GNOME-Autostart-Delay', '0'))
+                                except:
+                                    delay = 0
 
-                        if app_name in self.applications:
-                            self.applications[app_name]['startup_enabled'] = True
-                            self.applications[app_name]['delay'] = delay
-                        else:
-                            app_type = 'custom'
-                            if 'flatpak run' in actual_exec:
-                                app_type = 'flatpak'
-                            elif 'snap run' in actual_exec:
-                                app_type = 'snap'
+                            if app_name in self.applications:
+                                self.applications[app_name]['startup_enabled'] = True
+                                self.applications[app_name]['delay'] = delay
+                            else:
+                                app_type = 'custom'
+                                if 'flatpak run' in actual_exec:
+                                    app_type = 'flatpak'
+                                elif 'snap run' in actual_exec:
+                                    app_type = 'snap'
 
-                            self.applications[app_name] = {
-                                'name': app_name,
-                                'exec': actual_exec,
-                                'desktop_file': str(autostart_file),
-                                'startup_enabled': True,
-                                'type': app_type,
-                                'delay': delay
-                            }
+                                self.applications[app_name] = {
+                                    'name': app_name,
+                                    'exec': actual_exec,
+                                    'desktop_file': str(autostart_file),
+                                    'startup_enabled': True,
+                                    'type': app_type,
+                                    'delay': delay
+                                }
 
-                except Exception as e:
-                    print(f"Error parsing autostart file {autostart_file}: {e}")
+                    except Exception as e:
+                        print(f"Error parsing autostart file {autostart_file}: {e}")
         except Exception as e:
             print(f"Error accessing autostart directory: {e}")
 
-        self.filter_applications()
-        self.update_stats()
+        # Always schedule UI updates at the end
+        self.root.after(0, self.filter_applications)
+        self.root.after(0, self.update_stats)
 
     def filter_applications(self):
         """Filter applications based on search and filter criteria"""
+        if not hasattr(self, 'apps_tree'):
+            return
+
         search_term = self.search_var.get().lower()
         if search_term == self.search_placeholder.lower():
             search_term = ""
@@ -1018,7 +1102,7 @@ class ModernStartupManager:
                 'native': '🖥️ Native'
             }.get(app_type, '🖥️ Native')
 
-            icon = self.get_app_icon(info['exec'])
+            icon = info.get('icon') or self.get_app_icon(info['exec'])
             display_name = f"{icon} {name}"
 
             delay = info.get('delay', 0)
@@ -1086,7 +1170,7 @@ class ModernStartupManager:
     def parse_desktop_file(self, file_path):
         """Parse desktop file"""
         try:
-            config = configparser.ConfigParser()
+            config = configparser.RawConfigParser(strict=False)
             config.read(file_path, encoding='utf-8')
 
             if 'Desktop Entry' not in config:
@@ -1121,7 +1205,8 @@ class ModernStartupManager:
                 'exec': exec_cmd,
                 'desktop_file': file_path,
                 'startup_enabled': False,
-                'delay': 0
+                'delay': 0,
+                'icon_name': entry.get('Icon', '')
             }
         except Exception as e:
             print(f"Error parsing {file_path}: {e}")
@@ -1149,6 +1234,7 @@ class ModernStartupManager:
         """Add custom application"""
         try:
             dialog = ModernCustomAppDialog(self.root, self.colors, self.flatpak_available, self.snap_available)
+            self.root.wait_window(dialog.dialog)
             if dialog.result:
                 app_name, exec_cmd, app_type, delay = dialog.result
 
@@ -1234,248 +1320,137 @@ class ModernCustomAppDialog:
 
         self.dialog = tk.Toplevel(parent)
         self.dialog.title("🚀 Add Custom Application")
-        self.dialog.geometry("690x665")
+        self.dialog.geometry("690x750")
         self.dialog.configure(bg=self.colors['bg_primary'])
         self.dialog.transient(parent)
         self.dialog.grab_set()
-        self.dialog.resizable(False, False)
+        self.dialog.resizable(True, True)
 
         self.dialog.update_idletasks()
         x = (self.dialog.winfo_screenwidth() // 2) - 345
-        y = (self.dialog.winfo_screenheight() // 2) - 332
+        y = (self.dialog.winfo_screenheight() // 2) - 375
         self.dialog.geometry(f"+{x}+{y}")
 
         self.setup_dialog()
 
     def setup_dialog(self):
         """Setup dialog UI"""
+        # Outer container with fixed pads
         main_frame = tk.Frame(self.dialog, bg=self.colors['bg_primary'])
-        main_frame.pack(fill='both', expand=True, padx=40, pady=35)
+        main_frame.pack(fill='both', expand=True, padx=20, pady=20)
 
+        # 1. Header (pinned to top)
         header_frame = tk.Frame(main_frame, bg=self.colors['bg_primary'])
-        header_frame.pack(fill='x', pady=(0, 35))
+        header_frame.pack(fill='x', side='top', pady=(0, 15))
 
-        title_label = tk.Label(header_frame,
-                              text="➕ Add Custom Application",
-                              font=('Segoe UI', 20, 'bold'),
-                              bg=self.colors['bg_primary'],
-                              fg=self.colors['text_primary'])
-        title_label.pack()
+        tk.Label(header_frame, text="➕ Add Custom Application",
+                 font=('Segoe UI', 18, 'bold'),
+                 bg=self.colors['bg_primary'], fg=self.colors['text_primary']).pack()
 
         subtitle_text = "Create a custom startup entry for any application or script"
         if self.flatpak_available or self.snap_available:
-            subtitle_text += " (including package managers)"
+            subtitle_text += "\n(including package managers)"
 
-        subtitle_label = tk.Label(header_frame,
-                                 text=subtitle_text,
-                                 font=('Segoe UI', 11),
-                                 bg=self.colors['bg_primary'],
-                                 fg=self.colors['text_secondary'])
-        subtitle_label.pack(pady=(8, 0))
+        tk.Label(header_frame, text=subtitle_text, font=('Segoe UI', 10),
+                 bg=self.colors['bg_primary'], fg=self.colors['text_secondary']).pack(pady=(5, 0))
 
+        # 2. Buttons (pinned to bottom)
+        button_frame = tk.Frame(main_frame, bg=self.colors['bg_primary'])
+        button_frame.pack(fill='x', side='bottom', pady=(15, 0))
+
+        cancel_btn = tk.Button(button_frame, text="❌ Cancel",
+                              font=('Segoe UI', 11, 'bold'),
+                              bg=self.colors['surface'], fg=self.colors['text_primary'],
+                              relief='flat', bd=0, padx=25, pady=10,
+                              cursor='hand2', command=self.cancel)
+        cancel_btn.pack(side='right', padx=(10, 0))
+
+        add_btn = tk.Button(button_frame, text="✅ Add Application",
+                           font=('Segoe UI', 11, 'bold'),
+                           bg=self.colors['success'], fg=self.colors['bg_primary'],
+                           relief='flat', bd=0, padx=25, pady=10,
+                           cursor='hand2', command=self.add_app)
+        add_btn.pack(side='right')
+
+        # 3. Form (middle, expanding)
         form_frame = tk.Frame(main_frame, bg=self.colors['bg_secondary'], relief='flat', bd=0)
-        form_frame.pack(fill='both', expand=True, pady=(0, 25))
+        form_frame.pack(fill='both', expand=True)
 
+        # We can use a Canvas + Frame for scrolling if it's too tight, 
+        # but let's first try just better packing
         form_content = tk.Frame(form_frame, bg=self.colors['bg_secondary'])
-        form_content.pack(fill='both', expand=True, padx=35, pady=30)
+        form_content.pack(fill='both', expand=True, padx=25, pady=15)
 
-        name_label = tk.Label(form_content,
-                             text="📝 Application Name:",
-                             font=('Segoe UI', 12, 'bold'),
-                             bg=self.colors['bg_secondary'],
-                             fg=self.colors['text_primary'])
-        name_label.pack(anchor='w', pady=(0, 10))
-
+        # Name
+        tk.Label(form_content, text="� Application Name:", font=('Segoe UI', 11, 'bold'),
+                 bg=self.colors['bg_secondary'], fg=self.colors['text_primary']).pack(anchor='w', pady=(0, 5))
         self.name_var = tk.StringVar()
-        name_entry = tk.Entry(form_content,
-                             textvariable=self.name_var,
-                             font=('Segoe UI', 12),
-                             bg=self.colors['bg_tertiary'],
-                             fg=self.colors['text_primary'],
-                             insertbackground=self.colors['accent'],
-                             selectbackground=self.colors['accent'],
-                             selectforeground='white',
-                             relief='flat',
-                             bd=10)
-        name_entry.pack(fill='x', pady=(0, 25), ipady=10)
+        name_entry = tk.Entry(form_content, textvariable=self.name_var, font=('Segoe UI', 11),
+                             bg=self.colors['bg_tertiary'], fg=self.colors['text_primary'],
+                             insertbackground=self.colors['accent'], relief='flat', bd=8)
+        name_entry.pack(fill='x', pady=(0, 15), ipady=5)
 
+        # Type Selection
         if self.flatpak_available or self.snap_available:
-            type_label = tk.Label(form_content,
-                                 text="📦 Application Type:",
-                                 font=('Segoe UI', 12, 'bold'),
-                                 bg=self.colors['bg_secondary'],
-                                 fg=self.colors['text_primary'])
-            type_label.pack(anchor='w', pady=(0, 10))
-
+            tk.Label(form_content, text="📦 Application Type:", font=('Segoe UI', 11, 'bold'),
+                     bg=self.colors['bg_secondary'], fg=self.colors['text_primary']).pack(anchor='w', pady=(0, 5))
+            
             type_frame = tk.Frame(form_content, bg=self.colors['bg_secondary'])
-            type_frame.pack(fill='x', pady=(0, 25))
-
+            type_frame.pack(fill='x', pady=(0, 15))
             self.app_type_var = tk.StringVar(value="native")
 
-            native_radio = tk.Radiobutton(type_frame,
-                                        text="🖥️ Native Application",
-                                        variable=self.app_type_var,
-                                        value="native",
-                                        bg=self.colors['bg_secondary'],
-                                        fg=self.colors['text_primary'],
-                                        selectcolor=self.colors['bg_tertiary'],
-                                        activebackground=self.colors['bg_secondary'],
-                                        activeforeground=self.colors['accent'],
-                                        font=('Segoe UI', 11))
-            native_radio.pack(anchor='w', pady=(0, 5))
+            types = [("🖥️ Native", "native")]
+            if self.flatpak_available: types.append(("📦 Flatpak", "flatpak"))
+            if self.snap_available: types.append(("📦 Snap", "snap"))
 
-            if self.flatpak_available:
-                flatpak_radio = tk.Radiobutton(type_frame,
-                                             text="📦 Flatpak Application",
-                                             variable=self.app_type_var,
-                                             value="flatpak",
-                                             bg=self.colors['bg_secondary'],
-                                             fg=self.colors['text_primary'],
-                                             selectcolor=self.colors['bg_tertiary'],
-                                             activebackground=self.colors['bg_secondary'],
-                                             activeforeground=self.colors['accent'],
-                                             font=('Segoe UI', 11))
-                flatpak_radio.pack(anchor='w', pady=(5, 5))
-
-            if self.snap_available:
-                snap_radio = tk.Radiobutton(type_frame,
-                                          text="📦 Snap Application",
-                                          variable=self.app_type_var,
-                                          value="snap",
-                                          bg=self.colors['bg_secondary'],
-                                          fg=self.colors['text_primary'],
-                                          selectcolor=self.colors['bg_tertiary'],
-                                          activebackground=self.colors['bg_secondary'],
-                                          activeforeground=self.colors['accent'],
-                                          font=('Segoe UI', 11))
-                snap_radio.pack(anchor='w', pady=(5, 0))
+            for text, val in types:
+                tk.Radiobutton(type_frame, text=text, variable=self.app_type_var, value=val,
+                               bg=self.colors['bg_secondary'], fg=self.colors['text_primary'],
+                               selectcolor=self.colors['bg_tertiary'], font=('Segoe UI', 10)).pack(side='left', padx=(0, 15))
         else:
             self.app_type_var = tk.StringVar(value="native")
 
-        cmd_label = tk.Label(form_content,
-                            text="💻 Command to execute:",
-                            font=('Segoe UI', 12, 'bold'),
-                            bg=self.colors['bg_secondary'],
-                            fg=self.colors['text_primary'])
-        cmd_label.pack(anchor='w', pady=(0, 10))
-
+        # Command
+        tk.Label(form_content, text="💻 Command to execute:", font=('Segoe UI', 11, 'bold'),
+                 bg=self.colors['bg_secondary'], fg=self.colors['text_primary']).pack(anchor='w', pady=(0, 5))
         cmd_frame = tk.Frame(form_content, bg=self.colors['bg_secondary'])
         cmd_frame.pack(fill='x', pady=(0, 15))
-
+        
         self.cmd_var = tk.StringVar()
-        self.cmd_entry = tk.Entry(cmd_frame,
-                                 textvariable=self.cmd_var,
-                                 font=('Segoe UI', 12),
-                                 bg=self.colors['bg_tertiary'],
-                                 fg=self.colors['text_primary'],
-                                 insertbackground=self.colors['accent'],
-                                 selectbackground=self.colors['accent'],
-                                 selectforeground='white',
-                                 relief='flat',
-                                 bd=10)
-        self.cmd_entry.pack(side='left', fill='x', expand=True, ipady=10, padx=(0, 12))
+        self.cmd_entry = tk.Entry(cmd_frame, textvariable=self.cmd_var, font=('Segoe UI', 11),
+                                 bg=self.colors['bg_tertiary'], fg=self.colors['text_primary'],
+                                 insertbackground=self.colors['accent'], relief='flat', bd=8)
+        self.cmd_entry.pack(side='left', fill='x', expand=True, ipady=5, padx=(0, 10))
 
-        browse_btn = tk.Button(cmd_frame,
-                              text="📁 Browse",
-                              font=('Segoe UI', 11, 'bold'),
-                              bg=self.colors['accent'],
-                              fg='white',
-                              relief='flat',
-                              bd=0,
-                              padx=25,
-                              pady=10,
-                              cursor='hand2',
-                              command=self.browse_command)
+        browse_btn = tk.Button(cmd_frame, text="📁 Browse", font=('Segoe UI', 10, 'bold'),
+                              bg=self.colors['accent'], fg='white', relief='flat', 
+                              padx=15, pady=5, cursor='hand2', command=self.browse_command)
         browse_btn.pack(side='right')
 
-        def on_enter(e):
-            browse_btn.configure(bg=self.colors['accent_hover'])
-        def on_leave(e):
-            browse_btn.configure(bg=self.colors['accent'])
-
-        browse_btn.bind("<Enter>", on_enter)
-        browse_btn.bind("<Leave>", on_leave)
-
-        delay_label = tk.Label(form_content,
-                              text="⏱️ Startup Delay (seconds):",
-                              font=('Segoe UI', 12, 'bold'),
-                              bg=self.colors['bg_secondary'],
-                              fg=self.colors['text_primary'])
-        delay_label.pack(anchor='w', pady=(0, 10))
-
+        # Delay
+        tk.Label(form_content, text="⏱️ Startup Delay (seconds):", font=('Segoe UI', 11, 'bold'),
+                 bg=self.colors['bg_secondary'], fg=self.colors['text_primary']).pack(anchor='w', pady=(0, 5))
         self.delay_var = tk.StringVar(value="0")
-        delay_entry = tk.Entry(form_content,
-                              textvariable=self.delay_var,
-                              font=('Segoe UI', 12),
-                              bg=self.colors['bg_tertiary'],
-                              fg=self.colors['text_primary'],
-                              insertbackground=self.colors['accent'],
-                              selectbackground=self.colors['accent'],
-                              selectforeground='white',
-                              relief='flat',
-                              bd=10)
-        delay_entry.pack(fill='x', pady=(0, 25), ipady=10)
+        tk.Entry(form_content, textvariable=self.delay_var, font=('Segoe UI', 11),
+                 bg=self.colors['bg_tertiary'], fg=self.colors['text_primary'],
+                 insertbackground=self.colors['accent'], relief='flat', bd=8).pack(fill='x', ipady=5)
 
+        # Help
         help_texts = ["💡 Examples: /usr/bin/firefox, python3 /path/to/script.py"]
-        if self.flatpak_available:
-            help_texts.append("    For Flatpak: flatpak run com.example.App")
-        if self.snap_available:
-            help_texts.append("    For Snap: snap run app-name")
+        help_label = tk.Label(form_content, text="\n".join(help_texts), font=('Segoe UI', 9),
+                             bg=self.colors['bg_secondary'], fg=self.colors['surface'], justify='left')
+        help_label.pack(anchor='w', pady=(10, 0))
 
-        help_label = tk.Label(form_content,
-                             text="\n".join(help_texts),
-                             font=('Segoe UI', 10),
-                             bg=self.colors['bg_secondary'],
-                             fg=self.colors['surface'],
-                             justify='left')
-        help_label.pack(anchor='w', pady=(0, 30))
+        # Hover effects
+        def bind_hover(btn, normal_bg, hover_bg, normal_fg, hover_fg):
+            btn.bind("<Enter>", lambda e: btn.configure(bg=hover_bg, fg=hover_fg))
+            btn.bind("<Leave>", lambda e: btn.configure(bg=normal_bg, fg=normal_fg))
 
-        button_frame = tk.Frame(main_frame, bg=self.colors['bg_primary'])
-        button_frame.pack(fill='x', pady=(10, 0))
-
-        cancel_btn = tk.Button(button_frame,
-                              text="❌ Cancel",
-                              font=('Segoe UI', 12, 'bold'),
-                              bg=self.colors['surface'],
-                              fg=self.colors['text_primary'],
-                              relief='flat',
-                              bd=0,
-                              padx=30,
-                              pady=14,
-                              cursor='hand2',
-                              command=self.cancel)
-        cancel_btn.pack(side='right', padx=(12, 0))
-
-        add_btn = tk.Button(button_frame,
-                           text="✅ Add Application",
-                           font=('Segoe UI', 12, 'bold'),
-                           bg=self.colors['success'],
-                           fg=self.colors['bg_primary'],
-                           relief='flat',
-                           bd=0,
-                           padx=30,
-                           pady=14,
-                           cursor='hand2',
-                           command=self.add_app)
-        add_btn.pack(side='right')
-
-        def on_cancel_enter(e):
-            cancel_btn.configure(bg=self.colors['bg_tertiary'])
-        def on_cancel_leave(e):
-            cancel_btn.configure(bg=self.colors['surface'])
-
-        def on_add_enter(e):
-            add_btn.configure(bg='#94e2d5')
-        def on_add_leave(e):
-            add_btn.configure(bg=self.colors['success'])
-
-        cancel_btn.bind("<Enter>", on_cancel_enter)
-        cancel_btn.bind("<Leave>", on_cancel_leave)
-        add_btn.bind("<Enter>", on_add_enter)
-        add_btn.bind("<Leave>", on_add_leave)
+        bind_hover(add_btn, self.colors['success'], '#94e2d5', self.colors['bg_primary'], self.colors['bg_primary'])
+        bind_hover(cancel_btn, self.colors['surface'], self.colors['bg_tertiary'], self.colors['text_primary'], self.colors['text_primary'])
+        bind_hover(browse_btn, self.colors['accent'], self.colors['accent_hover'], 'white', 'white')
 
         name_entry.focus()
-
         self.dialog.bind('<Return>', lambda e: self.add_app())
         self.dialog.bind('<Escape>', lambda e: self.cancel())
 
