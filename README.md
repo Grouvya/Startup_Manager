@@ -50,19 +50,32 @@ sudo apt install snapd    # Debian/Ubuntu
 sudo dnf install snapd    # Fedora
 ```
 
-## Installation
+### Method 1: Debian Package (Recommended)
+1. Download the latest `.deb` package from the [Releases](https://github.com/yourusername/startup-manager/releases) page.
+2. Install it using `dpkg` or your favorite package manager:
+```bash
+sudo dpkg -i startup-manager_1.0.0_amd64.deb
+sudo apt install -f  # Fix potential dependencies
+```
 
-1. Download the script:
-
+### Method 2: Manual Installation (Script)
+1. Download the `Startup_Manager.py` script.
 2. Make it executable:
 ```bash
 chmod +x Startup_Manager.py
 ```
-
 3. Run the application:
 ```bash
 ./Startup_Manager.py
 ```
+
+## Privacy Policy
+
+**Startup Manager** is designed with user privacy in mind:
+- **No Data Collection**: The application does not collect, store, or transmit any personal information or usage data.
+- **Local Processing**: All configuration changes and application detections are performed locally on your machine.
+- **No Analytics**: There are no telemetries, trackers, or analytics embedded in the app.
+- **Open Source**: You can review the source code to verify how your data is handled.
 
 ## Usage
 
