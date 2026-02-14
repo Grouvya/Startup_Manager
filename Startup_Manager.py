@@ -617,7 +617,13 @@ class ModernStartupManager:
                             app_id = parts[0].strip()
                             app_name = parts[1].strip()
 
+                            # Prioritize exported desktop files as they have the correct 'flatpak run' Exec commands
+                            system_export_path = f"/var/lib/flatpak/exports/share/applications/{app_id}.desktop"
+                            user_export_path = f"{Path.home()}/.local/share/flatpak/exports/share/applications/{app_id}.desktop"
+                            
                             desktop_paths = [
+                                system_export_path,
+                                user_export_path,
                                 f"/var/lib/flatpak/app/{app_id}/current/active/files/share/applications/{app_id}.desktop",
                                 f"{self.flatpak_user_path}/{app_id}/current/active/files/share/applications/{app_id}.desktop"
                             ]
@@ -633,6 +639,9 @@ class ModernStartupManager:
                                 if app_info:
                                     app_info['type'] = 'flatpak'
                                     app_info['app_id'] = app_id
+                                    # Ensure exec command is correct for Flatpak
+                                    if not app_info['exec'].startswith('flatpak run') and not app_info['exec'].startswith('/usr/bin/flatpak run'):
+                                        app_info['exec'] = f"flatpak run {app_id}"
                                     flatpak_apps[app_info['name']] = app_info
                             else:
                                 flatpak_apps[app_name] = {
@@ -1319,16 +1328,14 @@ class ModernStartupManager:
     def open_autostart_folder(self):
         """Open autostart folder"""
         try:
-            if os.path.exists('/usr/bin/xdg-open'):
-                subprocess.run(['xdg-open', str(self.autostart_path)])
-            elif os.path.exists('/usr/bin/nautilus'):
-                subprocess.run(['nautilus', str(self.autostart_path)])
-            elif os.path.exists('/usr/bin/dolphin'):
-                subprocess.run(['dolphin', str(self.autostart_path)])
+            # Use webbrowser for a more reliable, cross-platform way to open folders
+            # In Linux, this typically uses xdg-open but is more robust than manual subprocess calls
+            folder_path = str(self.autostart_path)
+            if os.path.exists(folder_path):
+                webbrowser.open(folder_path)
+                self.status_var.set("📁 Opened autostart folder")
             else:
-                subprocess.run(['xdg-open', str(self.autostart_path)])
-
-            self.status_var.set("📁 Opened autostart folder")
+                self.show_message("Error", "Autostart folder does not exist.", 'error')
         except Exception as e:
             self.show_message("Error", f"Failed to open folder: {str(e)}", 'error')
 
