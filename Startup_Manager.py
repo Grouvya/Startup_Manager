@@ -1328,12 +1328,19 @@ class ModernStartupManager:
     def open_autostart_folder(self):
         """Open autostart folder"""
         try:
-            # Use webbrowser for a more reliable, cross-platform way to open folders
-            # In Linux, this typically uses xdg-open but is more robust than manual subprocess calls
             folder_path = str(self.autostart_path)
             if os.path.exists(folder_path):
-                webbrowser.open(folder_path)
-                self.status_var.set("📁 Opened autostart folder")
+                # Try xdg-open first as it's more reliable for folders on Linux
+                try:
+                    subprocess.Popen(['xdg-open', folder_path], 
+                                   start_new_session=True,
+                                   stderr=subprocess.DEVNULL,
+                                   stdout=subprocess.DEVNULL)
+                    self.status_var.set("📁 Opened autostart folder")
+                except Exception:
+                    # Fallback to webbrowser if xdg-open fails
+                    webbrowser.open(folder_path)
+                    self.status_var.set("📁 Opened autostart folder (fallback)")
             else:
                 self.show_message("Error", "Autostart folder does not exist.", 'error')
         except Exception as e:
